@@ -176,15 +176,18 @@ Generate the schedule in a clear, structured format (Markdown or plain text) tha
 }
 */
 
+
+
+/* Code that calls the API 3 times ONLY
 import { NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 // ✅ Initialize Gemini using environment key
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
-/**
- * Retry Gemini calls on quota (429) and overload (503)
- */
+// Retry Gemini calls on quota (429) and overload (503)
+ 
+
 async function generateWithRetry(
   model: any,
   prompt: string,
@@ -286,6 +289,110 @@ Generate the schedule in clean, readable Markdown.
         error:
           error.message ||
           "The AI service is temporarily unavailable. Please try again later.",
+      },
+      { status: 503 }
+    );
+  }
+}
+
+*/
+
+//Code that calls the API once and then resorts to mock ai
+import { NextResponse } from "next/server";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+
+// Initialize Gemini AI
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+
+// Single API call function
+async function callGeminiOnce(model: any, prompt: string): Promise<string> {
+  const result = await model.generateContent(prompt);
+  return result.response.text();
+}
+
+// Mock AI fallback
+function generateMockSchedule(
+  classes: { name: string; days: string; startTime: string; endTime: string }[]
+): string {
+  return classes
+    .map((cls) => {
+      const name = cls.name.trim() || "Unnamed Class";
+      const days = cls.days || "Mon–Fri";
+      const start = cls.startTime || "09:00 AM";
+      const end = cls.endTime || "10:30 AM";
+
+      return `
+### 📘 ${name} (${days} ${start}–${end})
+
+**Morning:** Review key concepts and practice problems for ${name}. Include wildfire safety awareness tips, such as safe study breaks and outdoor safety if applicable.  
+**Late Morning:** Work on assignments, labs, or coding exercises. Relate examples to real-world scenarios, including environmental awareness or fire prevention.  
+**Afternoon:** Take a healthy break. Read about wildfire prevention, emergency preparedness, and safety protocols.  
+**Late Afternoon:** Continue studying ${name} with active problem solving or case studies. Include reflection on wildfire lessons if relevant.  
+**Evening:** Summarize the day's learning. Note key insights and how wildfire safety knowledge applies to daily life.
+
+💡 **Tip:** Understanding wildfires is crucial. Incorporate safe practices, environmental awareness, and disaster readiness wherever possible.
+`;
+    })
+    .join("\n\n---\n\n");
+}
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+
+    // Input validation
+    if (!body.classes || !Array.isArray(body.classes) || body.classes.length === 0) {
+      return NextResponse.json(
+        { error: "Please provide at least one class with name, days, and times." },
+        { status: 400 }
+      );
+    }
+
+    const prompt = `
+You are an AI academic planner and time management assistant.
+Create a detailed weekly study schedule for a college student using their exact class info.
+
+Guidelines:
+- Use the exact class names, days, and times provided
+- Include breaks, meals, varied study sessions
+- Incorporate wildfire awareness and safety tips
+- Make it visually appealing, easy to read, and fun
+
+Classes:
+${body.classes
+      .map(
+        (c: any) =>
+          `📘 ${c.name} — ${c.days} (${c.startTime} to ${c.endTime})`
+      )
+      .join("\n")}
+`;
+
+    const model = genAI.getGenerativeModel({
+      model: "models/gemini-2.5-flash",
+    });
+
+    let scheduleText: string;
+
+    try {
+      // SINGLE Gemini API call
+      scheduleText = await callGeminiOnce(model, prompt);
+    } catch (error) {
+      console.warn("⚠️ Gemini unavailable, using mock AI.");
+      // fallback to mock AI
+      scheduleText = generateMockSchedule(body.classes);
+    }
+
+    return NextResponse.json({
+      schedule: scheduleText || "No schedule could be generated.",
+    });
+  } catch (error: any) {
+    console.error("❌ Schedule generation error:", error);
+
+    return NextResponse.json(
+      {
+        error:
+          error.message ||
+          "The service is temporarily unavailable. Please try again later.",
       },
       { status: 503 }
     );
